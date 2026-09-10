@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jtdlib"
+version = "0.1.0"
+description = "Pure-Python reader for Ichitaro (一太郎) .jtd / .jtdc documents with a python-docx-like read-only API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Masahito Omote" }]
+keywords = ["ichitaro", "jtd", "jtdc", "一太郎", "document", "parser"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Office/Business",
+  "Topic :: Text Processing",
+]
+dependencies = ["olefile>=0.46"]
+
+[project.optional-dependencies]
+jtdc = ["lhafile>=0.3"]
+test = ["pytest>=7", "lhafile>=0.3"]
+
+[project.scripts]
+jtdlib = "jtdlib.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/omote-masahito/jtdlib"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
