@@ -12,7 +12,7 @@ from .container import CompressedDocumentError, JtdError, NotJtdError
 from .document import Document
 from .model import Cell, Column, Footnote, LayoutBox, Paragraph, Row, Run, Table
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Document", "Paragraph", "Run", "Table", "Row", "Column", "Cell", "Footnote", "LayoutBox",

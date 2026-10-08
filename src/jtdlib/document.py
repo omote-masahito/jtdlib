@@ -27,7 +27,7 @@ class Document(_BlockContainer):
         for t in doc.tables:
             for row in t.rows: print([c.text for c in row.cells])
         for b in doc.iter_inner_content(): ...   # Paragraph | Table を本文順に
-        doc.text                                  # 一太郎のテキスト保存 (セル単位) と同じ順序
+        doc.text                                  # 全文 (セルの並び順は一太郎のテキスト保存と一致しないことがある)
 
     source: パス、bytes、または open() したバイナリファイルオブジェクト。
     """

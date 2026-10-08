@@ -10,16 +10,37 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from jtdlib.constants import CELL_NEWLINE as CELL  # noqa: E402  (後方互換の別名)
+
 HERE = Path(__file__).parent
 DATA = HERE / "data"
-CELL = "\ue000"          # テキスト保存 (セル単位) のセル内改行
 
 
-def data_file(name: str) -> Path:
-    return DATA / name
+@pytest.fixture
+def data_file():
+    """同梱 fixture (tests/data) のパスを返す。tests を import せずに済むよう fixture にしている。"""
+    return lambda name: DATA / name
+
+
+def utf16(s: str) -> list[int]:
+    """文字列を UTF-16BE コード単位の列に。合成ストリーム用。"""
+    b = s.encode("utf-16-be")
+    return [int.from_bytes(b[i:i + 2], "big") for i in range(0, len(b), 2)]
+
+
+def words(*xs: int) -> bytes:
+    """コード単位の列を UTF-16BE の bytes に。合成ストリーム用。"""
+    return b"".join(x.to_bytes(2, "big") for x in xs)
+
+
+@pytest.fixture
+def synth():
+    """合成ストリームを組むヘルパ (utf16, words)。"""
+    return SimpleNamespace(utf16=utf16, words=words)
 
 
 @dataclass(frozen=True)

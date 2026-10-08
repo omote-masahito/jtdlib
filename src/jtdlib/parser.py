@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import bisect
+
 from .constants import (
     ENTRY_END, INLINE_END, INLINE_START, PAGE_BREAK, PARA_END, REC_CELL, REC_INLINE, REC_LINE,
     RECORD, ROW_END, SEL_AUTO_TEXT, SEL_RUBY_BASE, SEL_RUBY_TEXT, SUB_INDENT, SUB_ROWSPEC, TAB,
@@ -17,6 +19,14 @@ from .container import read_words
 
 BORDER_GAP = 2   # fmt 2 の行スペックで観測される罫線スパン間のギャップ (座標単位)
 from .model import Cell, Paragraph, Run, Table, _Chunk, _Line
+
+
+def decode_words(words) -> str:
+    """UTF-16 コード単位の列を文字列にする。
+    サロゲートペア (U+10000 以上、「𠮷」など) を 1 文字に復元する。chr() を語ごとに
+    適用すると孤立サロゲートになり、print / json.dumps で UnicodeEncodeError になる。
+    対にならない孤立サロゲートは U+FFFD に置き換える。"""
+    return b"".join(x.to_bytes(2, "big") for x in words).decode("utf-16-be", "replace")
 
 
 class TextParser:
@@ -30,6 +40,8 @@ class TextParser:
         self.line: _Line | None = None
         self.chunk: _Chunk | None = None
         self.page_break_pending = False
+        self._end = len(self.u)
+        self.truncated = 0            # 終端 0x1E が見つからなかったインラインの数
 
     @staticmethod
     def segments(u: tuple[int, ...]) -> list[tuple[int, int]]:
@@ -143,34 +155,44 @@ class TextParser:
     def _map_styles(chunks: list[_Chunk], ents: list[tuple[int, int, int, int]]) -> list[int | None]:
         """各断片に、それを覆う罫線スパンの style を対応づける。
         スパン列は表の左端からの累積位置で並ぶ (fmt 2: スパン間に幅 2 の罫線ギャップ、
-        fmt 0/1: ギャップなし)。原点はセル座標と一致する候補を総当たりで選ぶ。"""
+        fmt 0/1: ギャップなし)。原点は「ある断片の左端がいずれかのスパンの左端に一致する」
+        候補 (重複除去済み) を総当たりで選び、候補ごとの照合は累積位置が単調なので二分探索で行う。
+        計算量は O(原点候補数 × 断片数 × log スパン数)。"""
         if not ents or not chunks:
             return [None] * len(chunks)
         best: tuple[int, list[int | None]] = (-1, [None] * len(chunks))
-        widths = [e[3] for e in ents]
+        full = 3 * len(chunks)                 # 全断片が幅まで一致したときの上限スコア
         for gap in (2, 0):
             prefix = [0]
-            for w in widths:
-                prefix.append(prefix[-1] + w + gap)
-            for c in chunks:
-                for k in range(len(ents)):
-                    origin = c.x0 - prefix[k]
-                    styles: list[int | None] = []
-                    score = 0
-                    for ch in chunks:
-                        hit = None
-                        for j, e in enumerate(ents):
-                            if widths[j] == 0:       # 幅 0 のスパンは位置を占めない
-                                continue
-                            xs = origin + prefix[j]
-                            if xs - 1 <= ch.x0 <= xs + widths[j]:
-                                hit = e[2]
-                                # 幅まで一致すれば確度が高い
-                                score += 2 + (widths[j] in (ch.x1 - ch.x0, ch.x1 - ch.x0 + 2))
-                                break
-                        styles.append(hit)
-                    if score > best[0]:
-                        best = (score, styles)
+            for e in ents:
+                prefix.append(prefix[-1] + e[3] + gap)
+            # 幅 0 のスパンは位置を占めないので照合対象から外す (添字は元の ents に戻せるよう保持)
+            idx = [j for j, e in enumerate(ents) if e[3] != 0]
+            if not idx:
+                continue
+            starts = [prefix[j] for j in idx]              # スパン左端 (原点基準)
+            ends = [prefix[j] + ents[j][3] for j in idx]   # スパン右端
+            # 同点のときは旧実装 (総当たり) と同じ候補を選ぶよう、列挙順を保った重複除去にする
+            origins = dict.fromkeys(c.x0 - prefix[k] for c in chunks for k in range(len(ents)))
+            for origin in origins:
+                styles: list[int | None] = []
+                score = 0
+                for ch in chunks:
+                    x = ch.x0 - origin
+                    # 元の条件: 最小の j で starts[j]-1 <= x <= ends[j]。ends は単調増加なので
+                    # x <= ends[j] を満たす最小の j を二分探索し、左端条件を確かめる。
+                    m = bisect.bisect_left(ends, x)
+                    if m < len(ends) and starts[m] - 1 <= x:
+                        j = idx[m]
+                        w = ents[j][3]
+                        styles.append(ents[j][2])
+                        score += 2 + (w in (ch.x1 - ch.x0, ch.x1 - ch.x0 + 2))
+                    else:
+                        styles.append(None)
+                if score > best[0]:
+                    best = (score, styles)
+                    if score == full:
+                        return best[1]
         return best[1]
 
     @classmethod
@@ -251,26 +273,33 @@ class TextParser:
             selector = u[i + ln - 2] if ln >= 2 else None
             j = i + ln - 1               # レコード末尾の語が 0x1D
             if j < len(u) and u[j] == INLINE_START:
+                end = self._end
+                # 終端 0x1E は領域内で探す。固定上限を置くと長いインラインが黙って切れ、
+                # 残りが本文に混入する (レビュー指摘)。領域内に終端がなければ壊れたレコード。
                 k = j + 1
-                while k < len(u) and u[k] != INLINE_END and k - j < 300:
+                while k < end and u[k] != INLINE_END:
                     k += 1
+                truncated = k >= end
                 raw = u[j + 1:k]
-                text = "".join(chr(x) for x in raw)
-                if selector == SEL_RUBY_TEXT and self.para.runs:
+                text = decode_words(raw)
+                if selector == SEL_RUBY_TEXT and self.para.runs and not truncated:
                     self.para.runs[-1].ruby = text
-                elif all(x < 0x20 for x in raw):
+                elif raw and all(x < 0x20 for x in raw) and not truncated:
                     # 制御コードだけのインライン (0x02, 0x08 など) = 図・枠などのオブジェクトアンカー
                     self.para.runs.append(Run("", hidden=True, selector=selector))
                 elif selector in (SEL_RUBY_BASE, SEL_AUTO_TEXT):
                     # 0x0001 は自動生成テキスト (脚注番号 "*1" など)。一太郎のテキスト保存にも現れる
-                    self.para.runs.append(Run(text, selector=selector))
+                    self.para.runs.append(Run(text, selector=selector, truncated=truncated))
                 else:
-                    self.para.runs.append(Run(text, hidden=True, selector=selector))
+                    self.para.runs.append(Run(text, hidden=True, selector=selector, truncated=truncated))
+                if truncated:
+                    self.truncated += 1
+                    return end
                 # 0x1E の後、次の 0x1F までは小さなトレーラ
                 k += 1
-                while k < len(u) and u[k] != TEXT_RUN and k - j < 310:
+                while k < end and u[k] != TEXT_RUN:
                     k += 1
-                return k + 1
+                return min(k + 1, end)
             return i + ln
         # cls 0x0000 (コンテキストマーカー), 0x0020 (表セクション遷移) 等は読み飛ばす
         return i + ln
@@ -278,11 +307,12 @@ class TextParser:
     def parse(self) -> list[Paragraph | Table]:
         u = self.u
         i, end = self.region()
-        buf: list[str] = []
+        self._end = end
+        buf: list[int] = []           # UTF-16 コード単位。flush 時にまとめて復号する
 
         def flush_buf():
             if buf:
-                self.para.runs.append(Run("".join(buf)))
+                self.para.runs.append(Run(decode_words(buf)))
                 buf.clear()
 
         while i < end:
@@ -312,11 +342,11 @@ class TextParser:
             elif x == TEXT_RUN or x == INLINE_END:
                 pass
             elif x == TAB:
-                buf.append("\t")
+                buf.append(0x09)
             elif x < 0x20 or 0x80 <= x < 0xA0:
                 pass                     # その他の制御コードは無視 (preservation は今後)
             else:
-                buf.append(chr(x))
+                buf.append(x)
             i += 1
         flush_buf()
         if self.table is not None:

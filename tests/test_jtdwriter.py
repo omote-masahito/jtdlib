@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # tools/ を import 可能に
-import jtdwriter  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))          # jtdwriter.py / taro.py は tools/ に置く
+jtdwriter = pytest.importorskip("jtdwriter")      # tools/ が無い配布物では skip
 from jtdwriter import Document, _expr  # noqa: E402
-
 
 # --- マクロ文の生成 (一太郎不要) -------------------------------------------
 

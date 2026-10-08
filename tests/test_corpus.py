@@ -18,7 +18,7 @@ import json
 import pytest
 
 from jtdlib import Document
-from tests.conftest import CELL
+from jtdlib.constants import CELL_NEWLINE as CELL
 
 
 def _got(case) -> list[str]:

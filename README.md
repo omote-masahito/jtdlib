@@ -46,7 +46,7 @@ from jtdlib import Document
 
 doc = Document("a.jtd")            # パス / bytes / バイナリファイルオブジェクト
 
-doc.text                           # 一太郎の「テキスト保存 (罫線内文字列=セル単位)」と同じ順序の全文
+doc.text                           # 全文。表のセルも含むが、並び順は一太郎のテキスト保存と一致しない場合がある (後述)
 for p in doc.paragraphs:           # 本文の段落 (表の外)
     print(p.text, p.indent_left, p.page_break_before)
 for t in doc.tables:
@@ -77,6 +77,7 @@ jtdlib a.jtd --dump          # 解析用 (セル座標など)
 - 一太郎の表は「物理行 + セル断片」でしか格納されない。`Row` は「同じ物理行から始まる論理セルの集まり」という近似で、結合セルは 1 つの `Cell` として 1 回だけ現れる (python-docx のように結合範囲に同じセルが繰り返されない)。`Table.cell(r, c)` も補完しない。
 - セル座標 `Cell.x0 / x1` の単位は 1 文字幅の 1/4 (`COORD_UNITS_PER_CHAR`)。`Cell.width_chars` で文字数換算。
 - 書式 (フォント・文字スタイル・画像) は持たない。段落インデント (カラム単位) と改ページだけ。
+- 表のセル文字列は抽出できるが、`doc.text` / `iter_strings()` でのセルの並び順は一太郎の「テキスト保存 (罫線内文字列=セル単位)」と一致しない場合がある。一太郎のセル列挙順は未解読で、検証した行政文書 9 本のうち順序まで一致したのは 3 本 (残りは空でない文字列の多重集合として一致。RFC 0010 の Known Gaps)。
 - 書き込みはできない。
 
 ## 対応状況

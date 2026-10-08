@@ -30,10 +30,12 @@ class Run:
     ruby: str | None = None          # ルビ (ふりがな)。text が親文字
     hidden: bool = False             # 表示されないインライン (テンプレート指示文、オブジェクトアンカー)
     selector: int | None = None      # 0x0001 インラインレコードのセレクタ
+    truncated: bool = False          # インラインの終端 0x1E が領域内に無く、領域末尾まで読んだ
 
     def __repr__(self) -> str:
         extra = f" ruby={self.ruby!r}" if self.ruby else ""
         extra += " hidden" if self.hidden else ""
+        extra += " truncated" if self.truncated else ""
         return f"Run({self.text!r}{extra})"
 
 
