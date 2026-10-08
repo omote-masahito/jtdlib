@@ -28,3 +28,8 @@ def test_inline_text_keeps_astral_characters(synth):
     blocks = TextParser(data).parse()
     assert "𠮷" in blocks[0].text
     blocks[0].text.encode("utf-8")
+
+def test_real_file_from_ichitaro(data_file):
+    from jtdlib import Document
+    doc = Document(data_file("サロゲート.jtd"))
+    assert doc.paragraphs[-1].text == "𠮷野家 😀"
